@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="cache-control" content="no-cache" />
+<meta http-equiv="pragma" content="no-cache" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+html, body {
+	padding: 0;
+	margin: 0;
+	background-color: #000;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	cursor: none;
+}
+canvas {
+	z-index: 0;
+}
+.container {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	height: 100%; 
+}
+.debug {
+	color: #ff0000;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	padding: 0.5em;
+	margin: 0;
+	z-index: 1;
+	display: block;
+}
+</style>
+</head>
+<body>
+
+<div id="container" class="container">
+	<canvas id="canvas" width="1024" height="768"></canvas>
+</div>
+<div id="debug" class="debug"></div>
+
+<script>
+
+const globalVariables = {
+	remoteServerBaseUrl: '127.0.0.1/',
+	package: undefined,
+	debug: false,
+	debugColour: '#ff0000',
+	waitingForTouch: false,
+	touches: [],
+	hotspots: [],
+	canvas: undefined,
+	context: undefined,
+	deviceId: '',
+	websocket: undefined,
+	subjectId: undefined,
+	subjectList: {
+		id: [],
+		timestamp: []
+	},
+	inactivityStartTime: new Date(),
+	inactivityDuration: 1000 * 60 * 10
+};
+
+
+window.addEventListener('load', async function() {
+
+	globalVariables.canvas = document.getElementById('canvas'),
+	globalVariables.context = document.getElementById('canvas').getContext('2d'),
+
+	globalVariables.canvas.width = window.innerWidth;
+	globalVariables.canvas.height = window.innerHeight;
+
+	globalVariables.package = getParameter('package');
+
+	document.addEventListener('touchstart', function(event) {
+
+		event.preventDefault();
+
+	}, {passive: false});
+
+
+	globalVariables.canvas.addEventListener('touchstart', function(event) {
+
+		globalVariables.waitingForTouch = false;
+		globalVariables.touches = event.touches;
+		globalVariables.inactivityStartTime = new Date();
+		event.preventDefault();
+
+	}, false);
+
+	globalVariables.canvas.addEventListener('click', function(event) {
+
+		globalVariables.waitingForTouch = false;
+		globalVariables.touches = [event];
+		globalVariables.inactivityStartTime = new Date();
+
+	});
+
+	let xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = async function() {
+		if (this.readyState == 4 && this.status == 200) {
+
+			globalVariables.deviceId = this.responseText;
+
+			globalVariables.websocket = new WebSocket('ws://' + globalVariables.remoteServerBaseUrl + 'connect?deviceid=' + globalVariables.deviceId);
+			globalVariables.websocket.onopen = function(event) {
+
+				let subjectId = getParameter('subjectid');
+				if (subjectId !== null) {
+					globalVariables.subjectId = subjectId;
+				}
+
+				loadScript('start.js', function() {
+					if (typeof start == 'function') {
+						start();
+					}
+					else {
+						alert('No \'start\' function.');
+					}
+				});
+
+			}
+			globalVariables.websocket.onmessage = function(event) {
+
+				globalVariables.subjectId = event.data;
+				globalVariables.subjectList.id.push(globalVariables.subjectId);
+				globalVariables.subjectList.timestamp.push(Date.now());
+	
+				dispatchEvent(
+					new CustomEvent('newsubject', {
+						detail: {
+							subjectList: globalVariables.subjectList, 
+							subjectId: globalVariables.subjectId, 
+							deviceId: globalVariables.deviceId
+						}
+					})
+				);
+
+			}
+
+		}
+	};
+	xhttp.open('GET', 'http://localhost:3000/getdeviceid', true);
+	xhttp.send();
+
+});
+
+
+/**
+ * Append text to the log file.
+ *
+ * @param {String} str - The text to log.
+ */
+const log = async function(str) {
+
+	await new Promise((resolve) => {
+
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4) {
+
+				if (this.status == 200) {
+					resolve();
+				}
+
+			}
+		};
+		xhttp.open('GET', 'http://' + globalVariables.remoteServerBaseUrl + '/log?package=' + globalVariables.package + '&logdata=' + str, true);
+		xhttp.send();
+
+	});
+
+}
+
+
+/**
+ * Resets the program.
+ *
+ * @param {String} subjectId - The ID of the subject to run after the reset.
+ */
+
+const reset = function(subjectId) {
+
+	if (subjectId === undefined) {
+
+		let url = window.location.protocol + '//' + window.location.hostname + window.location.pathname + '?package=' + globalVariables.package;
+		window.location.assign(url);
+
+	}
+	else {
+
+		let url = window.location.protocol + '//' + window.location.hostname + window.location.pathname + '?package=' + globalVariables.package + '&subjectid=' + subjectId;
+		window.location.assign(url);
+	}
+
+}
+
+
+/**
+ * Sets the global inactivity timer.
+ *
+ * @param {Number} t - The inactivity interval, in ms.
+ */
+const setInactivityTimer = function(t) {
+	
+	globalVariables.inactivityDuration = t;
+	globalVariables.inactivityTimer = setInterval(function() {
+		if (new Date() - globalVariables.inactivityStartTime > globalVariables.inactivityDuration) {
+
+			reset();
+
+		}
+
+	}, 100);
+
+}
+
+
+/**
+ * Clears the global inactivity timer.
+ */
+const clearInactivityTimer = function() {
+
+	clearInterval(globalVariables.inactivityTimer);
+
+}
+
+
+/**
+ * Generates a random integer.
+ *
+ * @param {Number} min - The lower bound (included).
+ * @param {Number} max - The upper bound (included).
+ * @return {Number} A random integer.
+ */
+const randomInt = function(min, max) {
+
+	return(Math.floor(Math.random() * (max - min + 1)) + min);
+
+}
+
+
+/**
+ * Shuffles the contents of an array.
+ *
+ * @param {Object[]} array - The array to be shuffled.
+ * @return {Object[]} The shuffled array.
+ */
+const shuffle = function(array) {
+
+	for (let i = array.length - 1; i > 0; i--) {
+
+		let j = Math.floor(Math.random() * (i + 1));
+		[array[i], array[j]] = [array[j], array[i]];
+
+	}
+
+	return(array);
+
+}
+
+
+/**
+ * Turns debugging on or off.
+ *
+ * @param {Boolean} state - Whether debugging should be turn on (true) or off (false).
+ * @param {String} col - The colour of the debug text/lines.
+ */
+const debug = function(state, col) {
+	
+	if (!state) {
+		let state = true;
+	}
+	globalVariables.debug = state;
+
+	if (col) {
+		globalVariables.debugColour = col;
+	}
+
+}
+
+
+/**
+ * Gets the current package.
+ *
+ * @return {String} The name of the current package.
+ */
+const getPackageName = function() {
+	
+	return(globalVariables.package);
+
+}
+
+
+/**
+ * Gets the ID of the current device.
+ *
+ * @return {String} The ID of the current device.
+ */
+const getDeviceId = function() {
+	
+	return(globalVariables.deviceId);
+
+}
+
+
+/**
+ * Gets the ID of the current subject.
+ *
+ * @return {String} The ID of the current subject.
+ */
+const getSubjectId = function() {
+	
+	return(globalVariables.subjectId);
+
+}
+
+
+/**
+ * Loads the data associated with the current subject.
+ *
+ * @param {String} exp - The name of the experiment from which to extract data.
+ * @param {String} col - The name of the data column.
+ * @return {Object} The data associated with the current subject.
+ */
+const getSubjectData = async function(exp, col) {
+
+	let subjectData = null;
+
+	await new Promise((resolve) => {
+
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4) {
+
+				if (this.status == 200) {
+					subjectData = JSON.parse(this.responseText);
+					resolve();
+				}
+
+			}
+		};
+		xhttp.open('GET', 'http://' + globalVariables.remoteServerBaseUrl + '/getdata?package=' + globalVariables.package + '&file=' + globalVariables.subjectId + '.json', true);
+		xhttp.send();
+
+	});
+
+	if (subjectData !== null) {
+		if (exp) {
+			if (col) {
+				return(subjectData[exp][col]);
+			}
+			else {
+				return(subjectData[exp]);
+			}
+		}
+		else {
+			return(subjectData);
+		}
+	}
+	else {
+		return({});
+	}
+
+}
+
+
+/**
+ * Returns whether there is data associated with the current subject.
+ *
+ * @param {Object} data - The dataset.
+ * @return {Boolean} Whether there is data associated with the current subject (false) or not (true).
+ */
+const isEmpty = function(data) {
+
+	return(Object.keys(data).length == 0);
+
+}
+
+
+/**
+ * Sets the data associated with the current subject.
+ *
+ * @param {String} exp - The name of the experiment to set data to.
+ * @param {Object} data - The data to set.
+ */
+//const setSubjectData = async function(exp, data) {
+//
+//	let currentData = await getSubjectData();
+//
+//	if (!currentData.hasOwnProperty(exp)) {
+//		currentData[exp] = {};
+//	}
+//	for (let key in data) {
+//		currentData[exp][key] = data[key];
+//	}
+//
+//	await saveSubjectData(currentData);
+//
+//}
+const setSubjectData = async function(folder, data) {
+
+	await new Promise((resolve) => {
+	
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4) {
+
+				resolve();
+
+			}
+		};
+		xhttp.open('POST', 'http://' + globalVariables.remoteServerBaseUrl + 'setdata?package=' + globalVariables.package + '&subject=' + globalVariables.subjectId + '&folder=' + folder);
+		xhttp.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+		xhttp.send(JSON.stringify(data));
+	
+	});
+
+}
+
+/**
+ * Appends to the data associated with the current subject.
+ *
+ * @param {String} exp - The name of the experiment to append data to.
+ * @param {Object} data - The data to append.
+ */
+//const appendSubjectData = async function(exp, data) {
+//
+//	let currentData = await getSubjectData();
+//
+//	if (!currentData.hasOwnProperty(exp)) {
+//		currentData[exp] = {};
+//	}
+//	for (let key in data) {
+//		if (data.hasOwnProperty(key)) {
+//			if (Array.isArray(currentData[exp][key])) {
+//				currentData[exp][key].push(data[key]);
+//			}
+//			else {
+//				if (currentData[exp].hasOwnProperty(key)) {
+//					currentData[exp][key] = [currentData[exp][key], data[key]];
+//				}
+//				else {
+//					currentData[exp][key] = [data[key]];
+//				}
+//			}
+//		}
+//	}
+//
+//	await saveSubjectData(currentData);
+//
+//}
+const appendSubjectData = async function(folder, data) {
+
+	//console.log('Data to be sent to the server: ' + JSON.stringify(data));
+
+	await new Promise((resolve) => {
+	
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4) {
+
+				resolve();
+
+			}
+		};
+		xhttp.open('POST', 'http://' + globalVariables.remoteServerBaseUrl + 'appenddata?package=' + globalVariables.package + '&subject=' + globalVariables.subjectId + '&folder=' + folder);
+		xhttp.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+		xhttp.send(JSON.stringify(data));
+	
+	});
+
+}
+
+/**
+ * Saves the data associated with the current subject.
+ *
+ * @param {Object} data - The data to save.
+ */
+//const saveSubjectData = async function(data) {
+//
+//	await new Promise((resolve) => {
+//	
+//		let xhttp = new XMLHttpRequest();
+//		xhttp.onreadystatechange = function() {
+//			if (this.readyState == 4) {
+//
+//				resolve();
+//
+//			}
+//		};
+//		xhttp.open('POST', 'http://' + globalVariables.remoteServerBaseUrl + 'savedata?package=' + globalVariables.package + '&subjectId=' + globalVariables.subjectId);
+//		xhttp.setRequestHeader('Content-Type', 'application/json;charset=UTF-8');
+//		xhttp.send(JSON.stringify(data));
+//	
+//	});
+//
+//}
+
+
+/**
+ * Loads javascript code from an external file.
+ *
+ * @param {String} src - The URL of the external (.js) file.
+ * @param {Function} callback - The callback function to run after the file has loaded.
+ */
+const loadScript = async function(src, callback) {
+
+	await new Promise((resolve) => {
+
+		var script = document.createElement('script');
+		script.onload = function() {
+
+			resolve();
+			if (callback) {
+				callback();
+			}
+			
+		};
+		script.src = 'http://' + globalVariables.remoteServerBaseUrl + globalVariables.package + '/scripts/' + src;
+		document.getElementsByTagName('head')[0].appendChild(script);
+
+	});
+
+}
+
+
+/**
+ * Runs the named javascript function.
+ *
+ * @param {function} fcn - The javascript function to run.
+ */
+const goTo = function(fcn) {
+	
+	resetTouches();
+
+	if(typeof fcn === 'function') {
+		fcn();
+	}
+	if(typeof fcn === 'string') {
+		eval(fcn + '();');
+	}
+
+}
+
+
+/**
+ * Resets the global variables associated with touch events.
+ */
+const resetTouches = function() {
+
+	globalVariables.waitingForTouch = false;
+	globalVariables.touches = [];
+	globalVariables.hotspots = [];
+
+}
+
+
+/**
+ * Clears the screen.
+ *
+ * @param {String} [col='#000'] - The colour to apply to the screen.
+ */
+const clearScreen = function(col) {
+
+	if (!col) {
+		col = '#000';
+	}
+
+	globalVariables.context.fillStyle = col;
+	globalVariables.context.fillRect(0, 0, globalVariables.canvas.width, globalVariables.canvas.height);
+	document.body.style.backgroundColor = col;
+
+}
+
+
+/**
+ * Preloads an image.
+ *
+ * @param {String} src - The URL of the image.
+ * @return {Object} An Image object.
+ */
+const loadImage = async function(src) {
+
+	let image;
+
+	await new Promise((resolve) => {
+
+		image = new Image();
+		image.onload = function() {
+			resolve();
+		}
+		image.src = 'http://' + globalVariables.remoteServerBaseUrl + globalVariables.package + '/resources/' + src;
+
+	});
+
+	return(image);
+
+}
+
+
+/**
+ * Draws an image to the screen.
+ *
+ * @param {String} src - The URL of the image.
+ * @param {Number} cx - The x coordinate of the image centre.
+ * @param {Number} cy - The y coordinate of the image centre.
+ * @param {Number} width - The image width.
+ * @param {Number} height - The image height.
+ * @param {Number} [rotation=0] - The image rotation, in degrees.
+ */
+const draw = async function(src, cx, cy, width, height, rotation) {
+
+	if (!rotation) {
+		rotation = 0;
+	}
+
+	await new Promise((resolve) => {
+
+		x = cx - (width / 2);
+		y = cy - (height / 2);
+
+		if (src instanceof HTMLImageElement) {
+	
+			globalVariables.context.save();
+			globalVariables.context.translate(x + (width / 2), y + (height / 2));
+			globalVariables.context.rotate((Math.PI / 180) * rotation);
+			globalVariables.context.translate(-(x + (width / 2)), -(y + (height / 2)));
+			globalVariables.context.drawImage(src, x, y, width, height);
+			globalVariables.context.restore();
+
+			resolve();
+
+		}
+
+		else {
+
+			let image = new Image();
+			image.onload = function() {
+
+				globalVariables.context.save();
+				globalVariables.context.translate(x + (width / 2), y + (height / 2));
+				globalVariables.context.rotate((Math.PI / 180) * rotation);
+				globalVariables.context.translate(-(x + (width / 2)), -(y + (height / 2)));
+				globalVariables.context.drawImage(image, x, y, width, height);
+				globalVariables.context.restore();
+
+				resolve();
+
+			}
+			image.src = 'http://' + globalVariables.remoteServerBaseUrl + globalVariables.package + '/resources/' + src;
+
+		}
+
+	});
+
+}
+
+
+/**
+ * Shows the screen.
+ *
+ * @param {Boolean} state - Whether to show (true) or hide (false) the screen.
+ */
+const showScreen = function(state) {
+	
+	if (state) {
+		globalVariables.canvas.style.display = 'block';
+	}
+	else {
+		globalVariables.canvas.style.display = 'none';
+	}
+
+}
+
+
+/**
+ * Removes hotspots.
+ *
+ * @param {String[]} hotspotLabels - An array of hotspot labels.
+ */
+const removeHotspots = function(hotspotLabels) {
+
+	if (!hotspotLabels) {
+
+		globalVariables.hotspots = [];
+
+	}
+	else {
+	
+		for (let i = 0; i < hotspotLabels.length; i++) {
+			for (let j = 0; j < globalVariables.hotspots.length; j++) {
+				if (hotspotLabels[i] == globalVariables.hotspots[j].label) {
+					globalVariables.hotspots.splice(j, 1);
+					break;
+				}
+			}
+		}
+
+	}
+
+}
+
+
+/**
+ * Creates a polygonal hotspot.
+ *
+ * @param {String} label - The label for the hotspot.
+ * @param {Number[][]} polygon - An array of [x, y] coordinates denoting the vertices of the polygon.
+ * @return {Object} An object containing the following fields: label, polygon, centre.
+ */
+const createHotspot = function(label, polygon) {
+
+	let sumX = 0, sumY = 0;
+	for (let k = 0; k < polygon.length; k++) {
+		sumX += polygon[k][0];
+		sumY += polygon[k][1];
+	}
+	let hotspotCentre = {x: sumX / polygon.length, y: sumY / polygon.length};
+
+	let hotspot = {
+		label: label,
+		polygon: polygon,
+		centre: hotspotCentre
+	};
+	globalVariables.hotspots.push(hotspot);
+
+	if (globalVariables.debug) {
+		
+		globalVariables.context.beginPath();
+		globalVariables.context.setLineDash([10, 10]);
+		globalVariables.context.moveTo(polygon[0][0], polygon[0][1]);
+		for (let i = 1; i < polygon.length; i++) {
+			globalVariables.context.lineTo(polygon[i][0], polygon[i][1]);
+		}
+		globalVariables.context.closePath();
+		globalVariables.context.strokeStyle = globalVariables.debugColour;
+		globalVariables.context.stroke();
+		globalVariables.context.setLineDash([]);
+
+		globalVariables.context.font = '16px Arial';
+		globalVariables.context.textAlign = 'center';
+		globalVariables.context.fillStyle = globalVariables.debugColour;
+		globalVariables.context.fillText(hotspot.label, hotspot.centre.x, hotspot.centre.y);
+
+	}
+
+	return(hotspot);
+}
+
+
+/**
+ * Creates a circular hotspot.
+ *
+ * @param {String} label - The label for the hotspot.
+ * @param {Number} cx - The x coordinate of the circle's centre.
+ * @param {Number} cy - The y coordinate of the circle's centre.
+ * @param {Number} radius - The radius of the circle.
+ * @param {Number} [n=36] - The number of vertices.
+ * @return {Object} An object containing the following fields: label, polygon, centre.
+ */
+const createCircularHotspot = function(label, cx, cy, radius, n) {
+
+	if (!n) {
+		n = 36;
+	}
+
+	polygon = [];
+	for (let theta = 0; theta < 360; theta += 360 / n) {
+		let x = Math.round(radius * Math.cos(theta / (180 / Math.PI)) + cx);
+		let y = Math.round(radius * Math.sin(theta / (180 / Math.PI)) + cy);
+		polygon.push([x, y]);
+	}
+
+	let hotspot = createHotspot(label, polygon);
+	return(hotspot);
+
+}
+
+
+/**
+ * Creates a rectangular hotspot.
+ *
+ * @param {String} label - The label for the hotspot.
+ * @param {Number} cx - The x coordinate of the rectangle's centre.
+ * @param {Number} cy - The y coordinate of the rectangle's centre.
+ * @param {Number} width - The width of the rectangle.
+ * @param {Number} height - The height of the rectangle.
+ * @return {Object} An object containing the following fields: label, polygon, centre.
+ */
+const createRectangularHotspot = function(label, cx, cy, width, height) {
+
+	polygon = [
+		[cx - width/2, cy - height / 2], 
+		[cx + width / 2, cy - height / 2], 
+		[cx + width / 2, cy + height / 2], 
+		[cx - width/2, cy + height / 2]
+	];
+
+	let hotspot = createHotspot(label, polygon);
+	return(hotspot);
+
+}
+
+
+/**
+ * Pauses before continuing execution.
+ *
+ * @param {Number} t - The length of time to pause, in milliseconds.
+ */
+const sleep = async function(t) {
+
+	if (globalVariables.debug) {
+		print('Sleeping for ' + t + ' ms.', globalVariables.debugColour);
+	}
+
+	await new Promise(resolve => setTimeout(resolve, t));
+
+	print('');
+
+}
+
+
+/**
+ * Checks whether a point is inside a polygon.
+ *
+ * @param {Number} x - The x coordinate of the point.
+ * @param {Number} y - The y coordinate of the point.
+ * @param {Number[][]} polygon - An array of [x, y] coordinates denoting the vertices of the polygon.
+ * @return {Boolean} Is the point inside the polygon.
+ */
+const inPolygon = function(x, y, polygon) {
+    
+	let inside = false;
+	for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+		let xi = polygon[i][0], yi = polygon[i][1];
+		let xj = polygon[j][0], yj = polygon[j][1];
+        
+		let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+		if (intersect) {
+			inside = !inside;
+		}
+	}
+    	return inside;
+
+}
+
+
+/**
+ * Checks whether a touch occurs within a hotspot.
+ *
+ * @param {Number} timeout - The length of time to wait until aborting, in milliseconds.
+ * @return {Object[]} An array of objects containing the following fields: hotspotLabel, x, y, elapsedTime, timeout.
+ */
+const hotspotTouched = async function(timeout) {
+
+	if (globalVariables.debug) {
+
+		if (timeout) {
+			print('Waiting for touch. Timeout in ' + timeout + ' ms.', globalVariables.debugColour);
+		}
+		else {
+			print('Waiting for touch.', globalVariables.debugColour);
+		}
+
+		for (let k = 0; k < globalVariables.hotspots.length; k++) {
+
+			globalVariables.context.beginPath();
+			globalVariables.context.moveTo(globalVariables.hotspots[k].polygon[0][0], globalVariables.hotspots[k].polygon[0][1]);
+			for (let i = 1; i < globalVariables.hotspots[k].polygon.length; i++) {
+				globalVariables.context.lineTo(globalVariables.hotspots[k].polygon[i][0], globalVariables.hotspots[k].polygon[i][1]);
+			}
+			globalVariables.context.closePath();
+			globalVariables.context.strokeStyle = globalVariables.debugColour;
+			globalVariables.context.stroke();
+
+			globalVariables.context.font = '16px Arial';
+			globalVariables.context.textAlign = 'center';
+			globalVariables.context.fillStyle = globalVariables.debugColour;
+			globalVariables.context.fillText(globalVariables.hotspots[k].label, globalVariables.hotspots[k].centre.x, globalVariables.hotspots[k].centre.y);
+
+		}
+
+	}
+		
+	const startTime = new Date();
+	globalVariables.waitingForTouch = true;
+	let touchDetails = [];
+
+	await new Promise((resolve) => {
+
+		const touchInterval = setInterval(function() {
+			if (!globalVariables.waitingForTouch) {
+
+				for (let i = 0; i < globalVariables.touches.length; i++) {
+					for (let j = 0; j < globalVariables.hotspots.length; j++) {
+
+						if (inPolygon(globalVariables.touches[i].clientX, 
+							globalVariables.touches[i].clientY, 
+							globalVariables.hotspots[j].polygon)) {
+							
+							clearInterval(touchInterval);
+
+							touchDetails.push({
+								hotspotLabel: globalVariables.hotspots[j].label, 
+								x: globalVariables.touches[i].clientX, 
+								y: globalVariables.touches[i].clientY, 
+								elapsedTime: new Date() - startTime, 
+								timeout: false
+							});
+
+							resolve();
+
+						}						
+					}
+				}
+			}
+
+			if (timeout) {
+			
+				if (new Date() - startTime > timeout) {
+					resolve();
+				}
+
+			}
+
+		}, 1);
+
+	});
+
+	return(touchDetails);
+}
+
+
+/**
+ * Requests that a reward is dispensed.
+ */
+const reward = function() {
+
+	if (globalVariables.debug) {
+		print('Reward requested from Treat and Train.', globalVariables.debugColour);
+	}
+
+	let xhttp = new XMLHttpRequest();
+	xhttp.open('GET', 'http://localhost:3000/reward', true);
+	xhttp.send();
+
+}
+
+
+/**
+ * Allows the touchscreen to be rebooted remotely.
+ */
+const reboot = function() {
+
+	let xhttp = new XMLHttpRequest();
+	xhttp.open('GET', 'http://localhost:3000/reboot', true);
+	xhttp.send();
+
+}
+
+
+/**
+ * Determines the activation state of the PIR (if available).
+ *
+ * @return {Number} A movement score, as a percentage.
+ */
+const detectMovement = async function() {
+
+	let movementScore = 0;
+
+	await new Promise((resolve) => {
+
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4) {
+				movementScore = this.responseText;
+				resolve();
+			}
+		};
+		xhttp.open('GET', 'http://localhost:3000/getmovement', true);
+		xhttp.send();
+
+	});
+
+	return (movementScore);
+
+}
+
+
+/**
+ * Plays an audio file.
+ *
+ * @param {String} src - The URL of the audio file.
+ */
+const playAudio = function(src) {
+
+	let audio = new Audio('http://' + globalVariables.remoteServerBaseUrl + globalVariables.package + '/resources/' + src);
+	audio.play();
+
+}
+
+
+/**
+ * Prints text to the screen.
+ *
+ * @param {String} str - The text to print to the screen.
+ * @param {String} [col='#ff0000'] - The text colour.
+ */
+const print = function(str, col) {
+
+	if (!col) {
+		col = '#ff0000';
+	}
+	document.getElementById('debug').style.color = col;
+	document.getElementById('debug').innerText = str;
+
+}
+
+
+/**
+ * Returns a named HTTP GET parameter.
+ *
+ * @param {String} param - The name of the parameter.
+ */
+const getParameter = function(param) {
+	let value = null, tmp = [];
+	location.search.substr(1).split('&').forEach(function (item) {
+		tmp = item.split('=');
+		if (tmp[0] === param) {
+			value = decodeURIComponent(tmp[1]);
+		}
+	});
+	return value;
+}
+
+
+/**
+ * Methods to extend Array.prototype.
+ */
+Array.prototype.countEqualTo = function(value) {
+	return (this.filter(function(item) {
+		return (item === value);
+	}).length);
+}
+
+Array.prototype.allEqualTo = function(value) {
+	return (this.every(function(item) {
+		return (item === value);
+	}));
+}
+
+Array.prototype.allIndicesOf = function(value) {
+	let indices = [];
+	for (let i = 0; i < this.length; i++) {
+        	if (this[i] === value) {
+            		indices.push(i);
+		}
+	}
+	return (indices);
+}
+
+Array.prototype.subset = function(indices) {
+	let array = [];
+	for (let i = 0; i < indices.length; i++) {
+		array.push(this[indices[i]]);
+	}
+	return (array);
+}
+
+</script>
+
+</body>
+</html>

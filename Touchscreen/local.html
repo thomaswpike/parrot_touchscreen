@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="cache-control" content="no-cache" />
+<meta http-equiv="pragma" content="no-cache" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+html, body {
+	padding: 0;
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	cursor: none;
+	overflow: hidden;
+}
+iframe {
+	position: absolute; 
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	border: 0;
+	z-index: 0;
+}
+a {
+	color: #0000ff;
+	text-decoration: none;
+}
+.button {
+	position: absolute; 
+	top: 0;
+	width: 3vw;
+	height: 3vw;
+	border: 0;
+	z-index: 1;
+	background: transparent;
+
+}
+.left-button {
+	left: 0;
+}
+.right-button {
+	right: 0;
+}
+.gui {
+	position: absolute; 
+	top: 0;
+	left: 0;
+	width: 98vw;
+	height: auto;
+	border: 0;
+	z-index: 2;
+	background: #fff;
+	display: none;
+	padding: 1vw;
+	box-shadow: 0 0.5vw 1.5vw 0.5vw rgba(0,0,0,0.3);
+
+}
+</style>
+</head>
+<body>
+
+<iframe id="display"></iframe>
+
+<div id="gui" class="gui">
+
+	<div>Device ID: <span id="deviceid" style="color: #ff0000;"></span> [<a href="javascript:setDeviceId();void(0);">change</a>]</div>
+	<div>Treat and Train Channel: <span id="treatandtrainchannel" style="color: #ff0000;"></span> [<a href="javascript:setTreatAndTrainChannel();void(0);">change</a> | <a href="javascript:testTreatAndTrain();void(0);">test</a>]</div>
+	<div>Remote Server Base URL: <span id="remoteserverbaseurl" style="color: #ff0000;"></span> [<a href="javascript:setRemoteServerBaseUrl();void(0);">change</a>]</div>
+	<div>Package: <span id="package" style="color: #ff0000;"></span> [<a href="javascript:setPackage();void(0);">change</a>]</div>
+	<div>Connection to Remote Server: <span id="remoteserverconnectionstatus" style="color: #ff0000;"></span> [<a href="javascript:connectToRemoteServer();void(0);">reconnect</a>]</div>
+	<div>Local IP address(s): <span id="localipaddress" style="color: #ff0000;"></span></div>
+
+	<div style="padding-top: 1em;">
+		<a href="javascript:refresh();void(0);">Refresh</a> | <a href="javascript:restart();void(0);">Restart</a> | <a href="javascript:exit();void(0);">Exit to desktop</a> | <a href="javascript:reboot();void(0);">Reboot</a> | <a href="javascript:shutdown();void(0);">Shutdown</a> | <a href="javascript:close();void(0);">Close</a>
+	</div>
+
+</div>
+
+<div id="left-button" class="button left-button" ontouchstart="touchStart('left');" ontouchend="touchEnd('left');"></div>
+<div id="right-button" class="button right-button" ontouchstart="touchStart('right');" ontouchend="touchEnd('right');"></div>
+
+<script>
+
+let leftButtonBeingTouched = false;	// Is the hidden left button being touched?
+let rightButtonBeingTouched = false;	// Is the hidden right button being touched?
+let remoteServerBaseUrl;		// The base URL of the remote server (from the local config file)
+let package;				// The name of the package (from the local config file)
+let remoteServerConnection = false;	// Is connected to the remote server?
+
+getDeviceId();
+getTreatAndTrainChannel();
+getPackage();
+getRemoteServerBaseUrl();
+getip();
+
+document.getElementById('gui').addEventListener('touchmove', function(event) {
+	event.preventDefault();
+}, {
+	passive: false
+});
+
+
+/**
+ * Responds when hidden buttons touched.
+ */
+function touchStart(side) {
+	if (side == 'left') {
+		leftButtonBeingTouched = true;
+	}
+	if (side == 'right') {
+		rightButtonBeingTouched = true;
+	}
+	if (leftButtonBeingTouched && rightButtonBeingTouched) {
+		showHideGUI();
+	}
+}
+
+/**
+ * Responds when hidden buttons untouched.
+ */
+function touchEnd(side) {
+	if (side == 'left') {
+		leftButtonBeingTouched = false;
+	}
+	if (side == 'right') {
+		rightButtonBeingTouched = false;
+	}
+}
+
+/**
+ * Shows or hides the options GUI.
+ */
+function showHideGUI() {
+	let gui = document.getElementById('gui');
+	if (gui.style.display == 'block') {
+		gui.style.display = 'none';
+	}
+	else {
+		gui.style.display = 'block';
+	}
+}
+
+/**
+ * Gets the device ID (from the local config file).
+ */
+function getDeviceId() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = function() {
+		if (this.readyState == 4 && this.status == 200) {
+			document.getElementById('deviceid').innerText = this.responseText;
+		}
+	};
+	xhttp.open('GET', 'http://localhost:3000/getdeviceid', true);
+	xhttp.send();
+}
+
+/**
+ * Gets the Treat and Train channel (from the local config file).
+ */
+function getTreatAndTrainChannel() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = function() {
+		if (this.readyState == 4 && this.status == 200) {
+			document.getElementById('treatandtrainchannel').innerText = this.responseText;
+		}
+	};
+	xhttp.open('GET', 'http://localhost:3000/gettreatandtrainchannel', true);
+	xhttp.send();
+}
+
+/**
+ * Gets the local IP address.
+ */
+function getip() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = function() {
+		if (this.readyState == 4 && this.status == 200) {
+			document.getElementById('localipaddress').innerText = this.responseText;
+		}
+	};
+	xhttp.open('GET', 'http://localhost:3000/getip', true);
+	xhttp.send();
+}
+
+/**
+ * Gets the base URL of the remote server (from the local config file).
+ */
+function getRemoteServerBaseUrl() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = function() {
+		if (this.readyState == 4 && this.status == 200) {
+			remoteServerBaseUrl = this.responseText;
+			document.getElementById('remoteserverbaseurl').innerText = remoteServerBaseUrl;
+			testConnectionToRemoteServer();
+			setInterval(function() { 
+				testConnectionToRemoteServer();
+			}, 10000);
+		}
+	};
+	xhttp.open('GET', 'http://localhost:3000/getremoteserverbaseurl', true);
+	xhttp.send();
+}
+
+/**
+ * Gets the package name (from the local config file).
+ */
+function getPackage() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = function() {
+		if (this.readyState == 4 && this.status == 200) {
+			package = this.responseText;
+			document.getElementById('package').innerText = package;
+		}
+	};
+	xhttp.open('GET', 'http://localhost:3000/getpackage', true);
+	xhttp.send();
+}
+
+/**
+ * Tests whether or not a connection with the remote server can be established.
+ */
+function testConnectionToRemoteServer() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.onload = function() { 
+		document.getElementById('remoteserverconnectionstatus').innerText = 'Connected';
+		if (!remoteServerConnection) {
+			connectToRemoteServer();
+			remoteServerConnection = true;
+		}
+	}
+	xhttp.onerror = function() { 
+		document.getElementById('remoteserverconnectionstatus').innerText = 'Not connected';
+		remoteServerConnection = false;
+	}
+	xhttp.open('GET', remoteServerBaseUrl + 'testconnection', true);
+	xhttp.send();
+}
+
+/**
+ * Connects to the remote server's start page.
+ */
+function connectToRemoteServer() {
+	document.getElementById('display').src = remoteServerBaseUrl + 'display.html?package=' + package;
+}
+
+/**
+ * refreshes the screen.
+ */
+function refresh() {
+	let display = document.getElementById('display');
+	display.src = display.src;
+}
+
+/**
+ * Restarts the local server.
+ */
+function restart() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.open('GET', 'http://localhost:3000/restart', true);
+	xhttp.send();
+}
+
+/**
+ * Stops the local server and exists the display.
+ */
+function exit() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.open('GET', 'http://localhost:3000/stop', true);
+	xhttp.send();
+}
+
+/**
+ * Reboots the Raspberry pi.
+ */
+function reboot() {
+	let response = confirm('Are you sure you want to reboot this device?');
+	if (response == true) {
+		let xhttp = new XMLHttpRequest();
+		xhttp.open('GET', 'http://localhost:3000/reboot', true);
+		xhttp.send();
+	}
+}
+
+/**
+ * Shuts down the Raspberry Pi.
+ */
+function shutdown() {
+	let response = confirm('Are you sure you want to shutdown this device?');
+	if (response == true) {
+		let xhttp = new XMLHttpRequest();
+		xhttp.open('GET', 'http://localhost:3000/shutdown', true);
+		xhttp.send();
+	}
+}
+
+/**
+ * Hides the GUI.
+ */
+function close() {
+	showHideGUI();
+}
+
+/**
+ * Interactively sets the device ID.
+ */
+function setDeviceId() {
+	let id = prompt('Enter a New Device ID', document.getElementById('deviceid').innerText).trim();
+	if (id == null || id == "" || /[^a-zA-Z0-9]/.test(id)) {
+		alert('Invalid ID');
+	}
+	else {
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4 && this.status == 200) {
+				getDeviceId();
+			}
+		};
+		xhttp.open('GET', 'http://localhost:3000/setdeviceid?id=' + id, true);
+		xhttp.send();
+	}
+}
+
+/**
+ * Interactively sets the Treat and Train channel.
+ */
+function setTreatAndTrainChannel() {
+	let channel = prompt('Enter a New Treat and Train Channel', document.getElementById('treatandtrainchannel').innerText).trim();
+	if (channel == null || channel == "" || /[^1234]/.test(channel)) {
+		alert('Invalid Channel');
+	}
+	else {
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4 && this.status == 200) {
+				getTreatAndTrainChannel();
+			}
+		};
+		xhttp.open('GET', 'http://localhost:3000/settreatandtrainchannel?channel=' + channel, true);
+		xhttp.send();
+	}
+}
+
+/**
+ * Tests the Treat and Train.
+ */
+function testTreatAndTrain() {
+	let xhttp = new XMLHttpRequest();
+	xhttp.open('GET', 'http://localhost:3000/reward', true);
+	xhttp.send();
+}
+
+/**
+ * Interactively sets the base URL of the remote server.
+ */
+function setRemoteServerBaseUrl() {
+	let url = prompt('Enter a New Remote Server Base URL', document.getElementById('remoteserverbaseurl').innerText).trim();
+	if (url == null || url == "") {
+		alert('Invalid URL');
+	}
+	else {
+		if (url.substr(-1) != '/') {
+			url = url + '/';
+		}
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4 && this.status == 200) {
+				getRemoteServerBaseUrl();
+			}
+		};
+		xhttp.open('GET', 'http://localhost:3000/setremoteserverbaseurl?url=' + url, true);
+		xhttp.send();
+	}
+
+}
+
+/**
+ * Interactively sets the package name.
+ */
+function setPackage() {
+	let name = prompt('Enter a Package Name', document.getElementById('package').innerText).trim();
+	if (name == null || name == "" || /[^a-zA-Z0-9]/.test(name)) {
+		alert('Invalid Name');
+	}
+	else {
+		let xhttp = new XMLHttpRequest();
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4 && this.status == 200) {
+				getPackage();
+			}
+		};
+		xhttp.open('GET', 'http://localhost:3000/setpackage?name=' + name, true);
+		xhttp.send();
+	}
+}
+
+</script>
+
+</body>
+</html>
